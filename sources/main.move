@@ -9,6 +9,12 @@ module data_marketplace::data_marketplace {
     use sui::tx_context::{Self, TxContext};
     use std::option::{Option, none, some, is_some, contains, borrow};
     use std::vector;
+    use sui::object::{ImmutableObject, ID};
+
+        struct CategoryRatingInfo has copy, drop {
+        total_rating: u64,
+        listing_count: u64,
+    }
 
     // Errors
     const EInvalidBid: u64 = 1;
@@ -28,10 +34,10 @@ module data_marketplace::data_marketplace {
         escrow: Balance<SUI>,
         dataSubmitted: bool,
         dispute: bool,
-        category: vector<u8>, // New field: category
-        tags: vector<u8>, // New field: tags
-        rating: u32, // New field: rating
-        reviews: vector<vector<u8>>, // New field: reviews
+        category: vector<u8>,
+        tags: vector<u8>,
+        rating: u32,
+        reviews: vector<vector<u8>>,
     }
 
     // Accessors
@@ -61,7 +67,6 @@ module data_marketplace::data_marketplace {
 
     // Public - Entry functions
     public entry fun create_listing(description: vector<u8>, price: u64, category: vector<u8>, tags: vector<u8>, ctx: &mut TxContext) {
-        
         let listing_id = object::new(ctx);
         transfer::share_object(DataListing {
             id: listing_id,
@@ -72,10 +77,10 @@ module data_marketplace::data_marketplace {
             escrow: balance::zero(),
             dataSubmitted: false,
             dispute: false,
-            category: category, // Set category
-            tags: tags, // Set tags
-            rating: 0, // Initialize rating
-            reviews: vector::empty(), // Initialize reviews
+            category: category,
+            tags: tags,
+            rating: 0,
+            reviews: vector::empty(),
         });
     }
 
@@ -95,21 +100,18 @@ module data_marketplace::data_marketplace {
     }
 
     public entry fun resolve_dispute(listing: &mut DataListing, resolved: bool, ctx: &mut TxContext) {
+        assert!(is_some(&listing.consumer), EInvalidBid); // Moved this check
         assert!(listing.provider == tx_context::sender(ctx), EDispute);
         assert!(listing.dispute, EAlreadyResolved);
-        assert!(is_some(&listing.consumer), EInvalidBid);
         let escrow_amount = balance::value(&listing.escrow);
         let escrow_coin = coin::take(&mut listing.escrow, escrow_amount, ctx);
         if (resolved) {
             let consumer = *borrow(&listing.consumer);
-            // Transfer funds to the consumer
             transfer::public_transfer(escrow_coin, consumer);
         } else {
-            // Refund funds to the provider
             transfer::public_transfer(escrow_coin, listing.provider);
         };
 
-        // Reset listing state
         listing.consumer = none();
         listing.dataSubmitted = false;
         listing.dispute = false;
@@ -117,15 +119,13 @@ module data_marketplace::data_marketplace {
 
     public entry fun release_payment(listing: &mut DataListing, ctx: &mut TxContext) {
         assert!(listing.provider == tx_context::sender(ctx), ENotProvider);
-        assert!(listing.dataSubmitted && !listing.dispute, EInvalidData);
+        assert!(listing.dataSubmitted && !listing.dispute, EInvalidWithdrawal); // Updated error code
         assert!(is_some(&listing.consumer), EInvalidBid);
         let consumer = *borrow(&listing.consumer);
         let escrow_amount = balance::value(&listing.escrow);
         let escrow_coin = coin::take(&mut listing.escrow, escrow_amount, ctx);
-        // Transfer funds to the consumer
         transfer::public_transfer(escrow_coin, consumer);
 
-        // Reset listing state
         listing.consumer = none();
         listing.dataSubmitted = false;
         listing.dispute = false;
@@ -135,14 +135,12 @@ module data_marketplace::data_marketplace {
     public entry fun cancel_listing(listing: &mut DataListing, ctx: &mut TxContext) {
         assert!(listing.provider == tx_context::sender(ctx) || contains(&listing.consumer, &tx_context::sender(ctx)), ENotProvider);
         
-        // Refund funds to the provider if not yet paid
         if (is_some(&listing.consumer) && !listing.dataSubmitted && !listing.dispute) {
             let escrow_amount = balance::value(&listing.escrow);
             let escrow_coin = coin::take(&mut listing.escrow, escrow_amount, ctx);
             transfer::public_transfer(escrow_coin, listing.provider);
         };
 
-        // Reset listing state
         listing.consumer = none();
         listing.dataSubmitted = false;
         listing.dispute = false;
@@ -158,6 +156,12 @@ module data_marketplace::data_marketplace {
         listing.price = new_price;
     }
 
+    public entry fun update_listing_category_and_tags(listing: &mut DataListing, new_category: vector<u8>, new_tags: vector<u8>, ctx: &mut TxContext) {
+        assert!(listing.provider == tx_context::sender(ctx), ENotProvider);
+        listing.category = new_category;
+        listing.tags = new_tags;
+    }
+
     public entry fun add_funds_to_listing(listing: &mut DataListing, amount: Coin<SUI>, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == listing.provider, ENotProvider);
         let added_balance = coin::into_balance(amount);
@@ -169,10 +173,8 @@ module data_marketplace::data_marketplace {
         assert!(listing.dataSubmitted == false, EInvalidWithdrawal);
         let escrow_amount = balance::value(&listing.escrow);
         let escrow_coin = coin::take(&mut listing.escrow, escrow_amount, ctx);
-        // Refund funds to the provider
         transfer::public_transfer(escrow_coin, listing.provider);
 
-        // Reset listing state
         listing.consumer = none();
         listing.dataSubmitted = false;
         listing.dispute = false;
@@ -181,6 +183,40 @@ module data_marketplace::data_marketplace {
     public entry fun mark_listing_complete(listing: &mut DataListing, ctx: &mut TxContext) {
         assert!(contains(&listing.consumer, &tx_context::sender(ctx)), ENotProvider);
         listing.dataSubmitted = true;
-        // Additional logic to mark the listing as complete
+    }
+
+    public entry fun mark_listing_complete(listing: &mut DataListing, ctx: &mut TxContext) {
+        assert!(contains(&listing.consumer, &tx_context::sender(ctx)), ENotProvider);
+        listing.dataSubmitted = true;
+    }
+
+    public entry fun leave_review_and_rating(listing: &mut DataListing, review: vector<u8>, rating: u32, ctx: &mut TxContext) {
+        assert!(contains(&listing.consumer, &tx_context::sender(ctx)), ENotProvider);
+        assert!(listing.dataSubmitted && !listing.dispute, EInvalidData);
+
+        listing.reviews = vector::append(&mut listing.reviews, review);
+        listing.rating = ((listing.rating * vector::length(&listing.reviews) as u32) + rating) / (vector::length(&listing.reviews) as u32 + 1);
+    }
+
+    public fun get_average_rating_for_category(category: &vector<u8>): u32 {
+        let category_rating_info = object::fold_uid(DataListing {
+            total_rating: 0,
+            listing_count: 0,
+        }, |info, listing| {
+            if (vector::eq_ref(&listing.category, category)) {
+                CategoryRatingInfo {
+                    total_rating: info.total_rating + listing.rating as u64,
+                    listing_count: info.listing_count + 1,
+                }
+            } else {
+                info
+            }
+        });
+
+        if (category_rating_info.listing_count == 0) {
+            0
+        } else {
+            (category_rating_info.total_rating / category_rating_info.listing_count) as u32
+        }
     }
 }
