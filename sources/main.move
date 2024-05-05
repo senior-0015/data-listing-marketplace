@@ -11,7 +11,7 @@ module data_marketplace::data_marketplace {
     use std::vector;
     use sui::object::{ImmutableObject, ID};
 
-    struct CategoryRatingInfo has copy, drop {
+        struct CategoryRatingInfo has copy, drop {
         total_rating: u64,
         listing_count: u64,
     }
@@ -198,9 +198,11 @@ module data_marketplace::data_marketplace {
         listing.rating = ((listing.rating * vector::length(&listing.reviews) as u32) + rating) / (vector::length(&listing.reviews) as u32 + 1);
     }
 
-    public fun get_average_rating_for_category(category: &vector<u8>, listing_ids: &vector<ID>): u32 {
-        let category_rating_info = vector::fold(listing_ids, CategoryRatingInfo { total_rating: 0, listing_count: 0 }, |info, listing_id| {
-            let listing = borrow_immutable_object<DataListing>(listing_id);
+    public fun get_average_rating_for_category(category: &vector<u8>): u32 {
+        let category_rating_info = object::fold_uid(DataListing {
+            total_rating: 0,
+            listing_count: 0,
+        }, |info, listing| {
             if (vector::eq_ref(&listing.category, category)) {
                 CategoryRatingInfo {
                     total_rating: info.total_rating + listing.rating as u64,
