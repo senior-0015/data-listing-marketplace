@@ -183,4 +183,23 @@ module data_marketplace::data_marketplace {
         listing.dataSubmitted = true;
         // Additional logic to mark the listing as complete
     }
+    
+    public entry fun update_rating(listing: &mut DataListing, new_rating: u32, ctx: &mut TxContext) {
+        assert!(listing.provider == tx_context::sender(ctx), ENotProvider);
+        listing.rating = new_rating;
+    }
+    
+    public entry fun get_listing_info(listing: &DataListing): (vector<u8>, u64, vector<u8>, vector<u8>, u32, vector<vector<u8>>) {
+        (listing.description, listing.price, listing.category, listing.tags, listing.rating, listing.reviews)
+    }
+    
+    public entry fun update_tags(listing: &mut DataListing, new_tags: vector<u8>, ctx: &mut TxContext) {
+        assert!(listing.provider == tx_context::sender(ctx), ENotProvider);
+        listing.tags = new_tags;
+    }
+    
+    public entry fun update_category(listing: &mut DataListing, new_category: vector<u8>, ctx: &mut TxContext) {
+        assert!(listing.provider == tx_context::sender(ctx), ENotProvider);
+        listing.category = new_category;
+    }
 }
